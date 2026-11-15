@@ -1,0 +1,139 @@
+name: Build & Release Fast Compose CLI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ---- Build and tests, for pull requests and release tags ----
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      # gradlew is not executable in git, since it was added on Windows.
+      - run: chmod +x gradlew
+
+      - name: Build
+        run: ./gradlew installDist --stacktrace
+
+      - name: Test
+        run: ./gradlew test --stacktrace
+
+      - name: Upload reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reports
+          path: build/reports/
+          retention-days: 7
+
+  # ---- Release tags only: one zip per OS and CPU, each built on that system so jlink bundles its Java runtime ----
+  package:
+    name: Package ${{ matrix.target }}
+    needs: [test]
+    if: startsWith(github.ref, 'refs/tags/')
+    strategy:
+      matrix:
+        include:
+          - target: windows-x64
+            runner: windows-latest
+          - target: windows-arm64
+            runner: windows-11-arm
+          - target: macos-x64
+            runner: macos-15-intel
+          - target: macos-arm64
+            runner: macos-latest
+          - target: linux-x64
+            runner: ubuntu-latest
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - run: chmod +x gradlew
+
+      # Fails if the runner isn't the target's system, since the zip would have no Java runtime.
+      - name: Package
+        run: |
+          ./gradlew distZip -Ptarget=${{ matrix.target }} --stacktrace
+          unzip -l build/distributions/*-${{ matrix.target }}.zip | grep -q "/runtime/bin/java"
+
+      - name: Upload the distribution
+        uses: actions/upload-artifact@v7
+        with:
+          name: fast-compose-${{ matrix.target }}
+          path: build/distributions/*.zip
+          retention-days: 7
+
+  # ---- Release: a GitHub release with the zips, for tags like v0.1.0 ----
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [package]
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # The tag must match the version, so v0.1.0 releases 0.1.0.
+      - name: Check tag matches version
+        run: |
+          version=$(grep '^cliVersion=' gradle.properties | cut -d'=' -f2)
+          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match cliVersion $version"
+            exit 1
+          fi
+
+      - name: Download the zips
+        uses: actions/download-artifact@v7
+        with:
+          pattern: fast-compose-*
+          path: dist
+          merge-multiple: true
+
+      - name: Name the release
+        run: echo "RELEASE_NAME=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ env.RELEASE_NAME }}
+          generate_release_notes: true
+          files: dist/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
