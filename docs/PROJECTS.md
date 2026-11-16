@@ -6,8 +6,8 @@ IDE.
 
 | What | Where it comes from | Options |
 |---|---|---|
-| [Other files](#other-files) | The file's source root and its module's shared source sets | `--no-sources`, `--source-root` |
-| [Resources](#resources) | The file's `res/` and `composeResources/` folders | `--res` |
+| [Other files](#other-files) | The file's source root and its module's shared source sets; every module with `--modules` | `--modules`, `--no-sources`, `--source-root` |
+| [Resources](#resources) | The file's `res/` and `composeResources/` folders; every module's with `--modules` | `--modules`, `--res` |
 | [Library code](#library-code) | Bindings built into the engine, then jars from the classpath, then stand-ins | `--classpath` |
 
 ## Other files
@@ -23,6 +23,7 @@ Where files are looked up:
 2. **Its module's shared source sets**: `src/commonMain/kotlin` (and `java`) for Kotlin Multiplatform, `src/main/kotlin`
    (and `java`) for Android and JVM modules.
 3. **Folders given with `--source-root`**, in order.
+4. **With `--modules`, every module of the project**: their `src/main` and `src/commonMain` source roots.
 
 ```
 shared/
@@ -43,8 +44,16 @@ shared/
   `Unresolved reference 'Card' (imported from app.ui)`.
 - **Errors in other files:** parse errors in a file the preview uses are reported against that file, and its last
   version without errors is used where possible.
-- **Other modules:** files of other Gradle modules aren't found by layout alone. Add their source roots with
-  `--source-root`:
+- **Other modules:** files of other Gradle modules aren't found by the file's own layout. `--modules` adds every
+  module of the project: the CLI finds the project's root (the nearest folder above the file with a
+  `settings.gradle.kts` or `settings.gradle`) and reads each module's `src/main` and `src/commonMain` sources and
+  resources. `build` and hidden folders are skipped.
+
+  ```bash
+  fast-compose render -r nowinandroid --modules -o previews
+  ```
+
+  Or name only the modules needed with `--source-root`:
 
   ```bash
   fast-compose render app/src/main/kotlin/app/ui -o previews \
@@ -66,6 +75,7 @@ folders next to the file, by Gradle layout, most specific first:
 1. Folders given with `--res`, in order.
 2. The file's own source set: `src/androidMain/res`, `src/jvmMain/composeResources`, …
 3. Its module's shared source sets: `src/commonMain/composeResources`, `src/main/res`.
+4. With `--modules`, every module's `src/main` and `src/commonMain` resource folders.
 
 The first folder with a matching resource wins. Within a folder, variants are picked like on a device:
 
@@ -80,7 +90,7 @@ The first folder with a matching resource wins. Within a folder, variants are pi
 - Supported files: PNG, JPEG, WebP, BMP and vector drawable XML images (not SVG); `strings.xml` with format arguments
   such as `%s` and `%1$d`; `colors.xml`; TTF and OTF fonts. See the engine's
   [resources guide](https://github.com/fast-compose/fast-compose/blob/main/docs/RESOURCES.md) for details.
-- Resources of other modules, such as a shared design system, need `--res`:
+- Resources of other modules, such as a shared design system, come with `--modules`, or one by one with `--res`:
 
   ```bash
   fast-compose render feature/home -o previews --res core/designsystem/src/main/res
@@ -98,7 +108,17 @@ A name from a library package is resolved in this order:
    are empty or defaults.
 
 Even without `--classpath`, the JDK, the Kotlin standard library and coroutines run for real, e.g. `java.io.File`,
-`LocalDate.now()` or `UUID.randomUUID()`.
+`LocalDate.now()` or `UUID.randomUUID()`. So does kotlinx-datetime 0.7, which the CLI ships: `Clock.System.now()`,
+`TimeZone.currentSystemDefault()`, `toJavaZoneId()` and `toJavaInstant()` work out of the box. A project's own jars
+from `--classpath` come first, so its version is used when given.
+
+Projects on kotlinx-datetime 0.6 use `kotlinx.datetime.Instant` and `kotlinx.datetime.Clock`, which 0.7 replaced with
+`kotlin.time.Instant` and `kotlin.time.Clock`; with the bundled 0.7 they run as stand-ins. Pass the project's own
+kotlinx-datetime JVM jar, e.g. from Gradle's cache or the `previewClasspath` task below:
+
+```bash
+fast-compose render -r . --modules -o previews --classpath ~/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-datetime-jvm/0.6.1/<hash>/kotlinx-datetime-jvm-0.6.1.jar
+```
 
 ### The classpath
 
@@ -173,3 +193,8 @@ Every preview runs with the composition locals `@Preview` would give it:
 `backgroundColor`, `uiMode` (night mode) and `device` (`spec:width=…dp,height=…dp` and `Devices.PHONE`, `TABLET`,
 `FOLDABLE`, `DESKTOP`, `PIXEL_4`, `PIXEL_7`, `NEXUS_5`, `PIXEL_TABLET`). `apiLevel`, `showSystemUi` and `wallpaper`
 are ignored.
+
+Multi-preview annotations (a project's own, such as `@DevicePreviews`, and AndroidX's `@PreviewLightDark`,
+`@PreviewScreenSizes` and `@PreviewFontScale`) give one preview per `@Preview` they stand for. A
+`@PreviewParameter(Provider::class)` parameter gives one preview per value of the provider; the provider class is
+read from the project's files like any other declaration. See [Commands](COMMANDS.md#paths).

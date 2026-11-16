@@ -1,5 +1,6 @@
 package ma7moud3ly.fast.compose.cli
 
+import java.nio.charset.Charset
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -56,8 +57,17 @@ data class Problem(
     }
 }
 
-/** A `@Preview` of a file: its [function], 1-based source [line] and settings. */
-data class PreviewInfo(val function: String, val line: Int, val config: PreviewConfig) {
+/**
+ * A preview of a file: its [function], 1-based source [line] and settings. [index] is its position among the file's
+ * previews as the engine lists them; [hasArguments] is true for one value of a `@PreviewParameter` provider.
+ */
+data class PreviewInfo(
+    val function: String,
+    val line: Int,
+    val config: PreviewConfig,
+    val index: Int = 0,
+    val hasArguments: Boolean = false,
+) {
     val name: String get() = config.name
 
     /** True when [filter] names this preview, by its name or its function's name. */
@@ -141,8 +151,8 @@ fun toText(reports: List<FileReport>, showPreviews: Boolean, details: Boolean = 
                 append("  preview  ${preview.name}")
                 if (preview.name != preview.function) append(" (${preview.function})")
                 append("  line ${preview.line}")
-                previewDetails(preview.config).takeIf { it.isNotEmpty() }?.let { append("  ·  $it") }
-                if (image != null) append("  →  ${image.path ?: "rendered"} (${image.widthPx} × ${image.heightPx} px)")
+                previewDetails(preview.config).takeIf { it.isNotEmpty() }?.let { append("  ${Symbols.dot}  $it") }
+                if (image != null) append("  ${Symbols.arrow}  ${image.path ?: "rendered"} (${image.widthPx} ${Symbols.times} ${image.heightPx} px)")
                 appendLine()
             }
             if (report.previews.isEmpty()) appendLine("  no @Preview functions")
@@ -168,8 +178,24 @@ fun problemText(problem: Problem): String {
 
 /** The size, theme, font scale and locale set by a `@Preview`, e.g. `360 × wrap dp · dark`. */
 private fun previewDetails(config: PreviewConfig): String = listOfNotNull(
-    if (config.widthDp != null || config.heightDp != null) "${config.widthDp ?: "wrap"} × ${config.heightDp ?: "wrap"} dp" else null,
+    if (config.widthDp != null || config.heightDp != null) "${config.widthDp ?: "wrap"} ${Symbols.times} ${config.heightDp ?: "wrap"} dp" else null,
     if (config.darkTheme) "dark" else null,
-    if (config.fontScale != 1f) "font ×${config.fontScale}" else null,
+    if (config.fontScale != 1f) "font ${Symbols.times}${config.fontScale}" else null,
     config.locale,
-).joinToString("  ·  ")
+).joinToString("  ${Symbols.dot}  ")
+
+/**
+ * Characters the text report uses, or ASCII ones when stdout's encoding can't show them, e.g. a Windows console on code
+ * page 437, which has no `→` or `×`.
+ */
+internal object Symbols {
+    private val encoder = runCatching {
+        Charset.forName(System.getProperty("stdout.encoding") ?: Charset.defaultCharset().name()).newEncoder()
+    }.getOrNull()
+
+    private fun pick(symbol: String, ascii: String): String = if (encoder?.canEncode(symbol) == true) symbol else ascii
+
+    val arrow: String = pick("→", "->")
+    val times: String = pick("×", "x")
+    val dot: String = pick("·", "-")
+}

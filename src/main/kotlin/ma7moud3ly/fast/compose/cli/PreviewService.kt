@@ -4,8 +4,7 @@ import java.io.Closeable
 import ma7moud3ly.fast.compose.interpreter.Interpreter
 import ma7moud3ly.fast.compose.interpreter.LoadedSources
 import ma7moud3ly.fast.compose.interpreter.RuntimeError
-import ma7moud3ly.fast.compose.ui.PreviewConfig
-import ma7moud3ly.fast.compose.ui.previewConfig
+import ma7moud3ly.fast.compose.ui.previews
 
 /** What to do with a file's previews. */
 enum class Mode {
@@ -27,9 +26,15 @@ class PreviewService(project: ProjectSettings) : Closeable {
 
     /**
      * Runs [mode] on [file]'s previews, or only those [filter] names (by preview or function name). Problems found by
-     * several previews are reported once.
+     * several previews are reported once. [onPreview] is called before each preview runs.
      */
-    fun run(file: SourceText, mode: Mode, filter: String? = null, settings: RenderSettings = RenderSettings()): FileReport {
+    fun run(
+        file: SourceText,
+        mode: Mode,
+        filter: String? = null,
+        settings: RenderSettings = RenderSettings(),
+        onPreview: (PreviewInfo) -> Unit = {},
+    ): FileReport {
         val problems = ProblemList()
         val parsed = file.parsed
         parsed.diagnostics.forEach { problems += Problem.of(it, file.path) }
@@ -46,6 +51,7 @@ class PreviewService(project: ProjectSettings) : Closeable {
         val output = mutableListOf<String>()
         val images = mutableListOf<RenderedImage>()
         for (preview in previews) {
+            onPreview(preview)
             val config = preview.config.copy(
                 darkTheme = settings.dark ?: preview.config.darkTheme,
                 fontScale = settings.fontScale ?: preview.config.fontScale,
@@ -54,6 +60,7 @@ class PreviewService(project: ProjectSettings) : Closeable {
                 RenderRequest(
                     file = file,
                     entry = preview.function,
+                    previewIndex = preview.index.takeIf { preview.hasArguments },
                     config = config,
                     device = settings.device,
                     density = settings.density,
@@ -87,10 +94,13 @@ class PreviewService(project: ProjectSettings) : Closeable {
         loaded.missing.map { Problem.of(it, file.path) } +
             loaded.diagnostics.flatMap { (path, diagnostics) -> diagnostics.map { Problem.of(it, path) } }
 
-    /** [file]'s `@Preview`s with their settings; invalid `@Preview` arguments are reported and ignored. */
+    /**
+     * [file]'s previews with their settings: one per `@Preview`, including those of multi-preview annotations such as
+     * `@PreviewLightDark` or a project's `@DevicePreviews`. Invalid `@Preview` arguments are reported and ignored.
+     */
     private fun previews(file: SourceText, loaded: LoadedSources?, problems: ProblemList): List<PreviewInfo> {
         val program = file.parsed.program
-        if (program.previews.isEmpty()) return emptyList()
+        if (program.functions.none { it.annotations.isNotEmpty() }) return emptyList()
         val reader = Interpreter(
             program,
             renderer.registry,
@@ -104,11 +114,10 @@ class PreviewService(project: ProjectSettings) : Closeable {
             },
             onLog = {},
             dependencies = loaded?.dependencies.orEmpty(),
+            externals = workspace.externals,
         )
-        return program.previews.map { (function, annotation) ->
-            val config = runCatching { reader.previewConfig(function, annotation) }.getOrNull()
-                ?: PreviewConfig(name = function.name)
-            PreviewInfo(function.name, function.span.line, config)
+        return reader.previews(program).mapIndexed { index, entry ->
+            PreviewInfo(entry.function.name, entry.function.span.line, entry.config, index, entry.arguments.isNotEmpty())
         }
     }
 

@@ -37,6 +37,70 @@ class PreviewServiceTest {
     }
 
     @Test
+    fun rendersOneImagePerPreviewParameterValue() {
+        val file = SourceText.of(
+            """
+            class NamesProvider : PreviewParameterProvider<String> {
+                override val values = sequenceOf("Ann", "Bob")
+            }
+
+            @Preview(widthDp = 80, heightDp = 40)
+            @Composable
+            fun Greeting(@PreviewParameter(NamesProvider::class) name: String) {
+                Text("Hi " + name)
+            }
+            """.trimIndent(),
+            null,
+        )
+        val report = service.run(file, Mode.RENDER, settings = RenderSettings(density = 1f, waitMs = 0))
+        assertEquals(2, report.previews.size)
+        assertTrue(report.previews.all { it.hasArguments })
+        assertEquals(emptyList(), report.problems.filter { it.severity == Severity.ERROR })
+        assertEquals(2, report.images.size)
+    }
+
+    @Test
+    fun runsKotlinxDatetimeWithoutAClasspath() {
+        assertTrue(BundledLibraries.jars.isNotEmpty())
+        val file = SourceText.of(
+            """
+            import kotlinx.datetime.TimeZone
+            import kotlinx.datetime.toJavaZoneId
+
+            @Preview
+            @Composable
+            fun Zone() {
+                Text(TimeZone.UTC.toJavaZoneId().toString())
+            }
+            """.trimIndent(),
+            null,
+        )
+        val report = service.run(file, Mode.CHECK)
+        assertEquals(emptyList(), report.problems)
+    }
+
+    @Test
+    fun findsMultiPreviewAnnotations() {
+        val file = SourceText.of(
+            """
+            @Preview(name = "Small", widthDp = 100)
+            @Preview(name = "Large", widthDp = 300)
+            annotation class Sizes
+
+            @Sizes
+            @Composable
+            fun Card() {
+                Text("Card")
+            }
+            """.trimIndent(),
+            null,
+        )
+        val report = service.run(file, Mode.LIST)
+        assertEquals(listOf(100, 300), report.previews.map { it.config.widthDp })
+        assertTrue(report.previews.all { it.function == "Card" })
+    }
+
+    @Test
     fun reportsParseErrors() {
         val report = service.run(SourceText.of("@Preview @Composable fun A() { Text(\"a\" }", null), Mode.CHECK)
         assertTrue(report.errors > 0)

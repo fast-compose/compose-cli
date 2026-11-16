@@ -12,6 +12,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ImageComposeScene
@@ -35,6 +36,7 @@ import ma7moud3ly.fast.compose.bindings.resources.LocalResourceEnvironment
 import ma7moud3ly.fast.compose.bindings.resources.ResourceEnvironment
 import ma7moud3ly.fast.compose.bindings.resources.ResourceProvider
 import ma7moud3ly.fast.compose.interpreter.ExternalResolver
+import ma7moud3ly.fast.compose.interpreter.Interpreter
 import ma7moud3ly.fast.compose.interpreter.LocalExternalResolver
 import ma7moud3ly.fast.compose.interpreter.Registry
 import ma7moud3ly.fast.compose.interpreter.SourceProvider
@@ -43,16 +45,21 @@ import ma7moud3ly.fast.compose.ui.ComposeCode
 import ma7moud3ly.fast.compose.ui.FastComposeContent
 import ma7moud3ly.fast.compose.ui.LogLine
 import ma7moud3ly.fast.compose.ui.PreviewConfig
+import ma7moud3ly.fast.compose.ui.previews
 import ma7moud3ly.fast.compose.ui.rememberComposeCode
 import ma7moud3ly.fast.compose.ui.rememberFullRegistry
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
 import org.jetbrains.skia.Surface as SkiaSurface
 
-/** One preview to render: [entry] of [file] with [config], in a window of [device] size. */
+/**
+ * One preview to render: [entry] of [file] with [config], in a window of [device] size. [previewIndex] is set for a
+ * preview called with a `@PreviewParameter` value: its position among the file's previews, whose arguments it takes.
+ */
 class RenderRequest(
     val file: SourceText,
     val entry: String,
+    val previewIndex: Int? = null,
     val config: PreviewConfig,
     val device: DeviceSize,
     val density: Float,
@@ -136,7 +143,14 @@ class Renderer : Closeable {
                     CompositionLocalProvider(LocalExternalResolver provides request.externals) {
                         val current = rememberComposeCode(request.file.text, request.file.path, request.sources)
                         code = current
-                        FastComposeContent(current, entry = request.entry, registry = registry, resources = request.resources)
+                        val arguments = rememberPreviewArguments(current, request, registry)
+                        FastComposeContent(
+                            current,
+                            entry = request.entry,
+                            registry = registry,
+                            resources = request.resources,
+                            arguments = arguments,
+                        )
                     }
                 }
             }
@@ -172,9 +186,9 @@ class Renderer : Closeable {
             Snapshot.sendApplyNotifications()
             val png = if (request.capture && crash == null) image?.let { crop(it, contentSize) } else null
             return RenderResult(
-                png = png,
-                widthPx = if (png != null) contentSize.width.coerceIn(1, widthPx) else 0,
-                heightPx = if (png != null) contentSize.height.coerceIn(1, heightPx) else 0,
+                png = png?.bytes,
+                widthPx = png?.width ?: 0,
+                heightPx = png?.height ?: 0,
                 diagnostics = code?.diagnostics.orEmpty(),
                 logs = code?.logs?.toList().orEmpty(),
                 crash = crash,
@@ -185,16 +199,23 @@ class Renderer : Closeable {
         }
     }
 
-    /** The top-left [size] of [image] as PNG bytes; the whole image when [size] is empty. */
-    private fun crop(image: Image, size: IntSize): ByteArray {
-        val width = size.width.takeIf { it > 0 }?.coerceAtMost(image.width) ?: image.width
-        val height = size.height.takeIf { it > 0 }?.coerceAtMost(image.height) ?: image.height
+    /** PNG [bytes] of [width] × [height] pixels. */
+    private class Png(val bytes: ByteArray, val width: Int, val height: Int)
+
+    /**
+     * The top-left [size] of [image] as a PNG. When the preview's own content has no size, e.g. a dialog, which draws
+     * in a layer of its own, the whole window is kept.
+     */
+    private fun crop(image: Image, size: IntSize): Png {
+        val empty = size.width <= 1 || size.height <= 1
+        val width = if (empty) image.width else size.width.coerceAtMost(image.width)
+        val height = if (empty) image.height else size.height.coerceAtMost(image.height)
         val surface = SkiaSurface.makeRasterN32Premul(width, height)
         try {
             surface.canvas.drawImage(image, 0f, 0f)
             val data = surface.makeImageSnapshot().encodeToData(EncodedImageFormat.PNG)
                 ?: error("Could not encode the preview as PNG")
-            return data.bytes
+            return Png(data.bytes, width, height)
         } finally {
             surface.close()
         }
@@ -215,6 +236,24 @@ class Renderer : Closeable {
  * A preview as the IDE plugin frames it: Material colors for its theme, its background, and the composition locals
  * `@Preview` sets. Without `widthDp`/`heightDp` it wraps its content up to [window]; [onSize] gets the size in pixels.
  */
+/**
+ * The `@PreviewParameter` value [request] is rendered with, as a list of arguments; empty for other previews. The
+ * provider runs on [code]'s own program and files, so its values belong to the program the preview renders.
+ */
+@Composable
+private fun rememberPreviewArguments(code: ComposeCode, request: RenderRequest, registry: Registry): List<Any?> {
+    val index = request.previewIndex ?: return emptyList()
+    val program = code.program
+    val dependencies = code.dependencies
+    return remember(program, dependencies, index) {
+        if (program == null) return@remember emptyList()
+        runCatching {
+            Interpreter(program, registry, onError = {}, onLog = {}, dependencies = dependencies, externals = request.externals)
+                .previews(program).getOrNull(index)?.arguments
+        }.getOrNull().orEmpty()
+    }
+}
+
 @Composable
 private fun PreviewFrame(config: PreviewConfig, window: DpSize, onSize: (IntSize) -> Unit, content: @Composable () -> Unit) {
     val dark = config.darkTheme

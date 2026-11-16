@@ -1,3 +1,4 @@
+import java.util.Properties
 import java.util.jar.JarOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
@@ -9,7 +10,12 @@ plugins {
 }
 
 group = "io.github.fast-compose"
-version = providers.gradleProperty("cliVersion").get()
+// The CLI's version: `cliVersion` in local.properties, which CI writes from the release tag; "dev" without it.
+val localProperties: String? = providers.fileContents(layout.projectDirectory.file("local.properties")).asText.orNull
+val cliVersion: String? = localProperties?.let { text ->
+    Properties().apply { load(text.reader()) }.getProperty("cliVersion")
+}
+version = cliVersion?.takeIf { it.isNotBlank() } ?: "dev"
 
 val desktopTargets = listOf("windows-x64", "windows-arm64", "macos-x64", "macos-arm64", "linux-x64", "linux-arm64")
 
@@ -54,6 +60,8 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
+    // Shipped for library code previews often use; see BundledLibraries.
+    implementation(libs.kotlinx.datetime)
     implementation("org.jetbrains.compose.desktop:desktop-jvm-$target:${libs.versions.composeMultiplatform.get()}")
 
     testImplementation(kotlin("test-junit"))
@@ -204,4 +212,5 @@ tasks.jar {
 tasks.test {
     useJUnit()
     systemProperty("java.awt.headless", "true")
+    testLogging { exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
 }

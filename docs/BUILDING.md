@@ -37,7 +37,7 @@ The tests render previews off-screen, so they need no display; they run on CI ma
 ## Distribution
 
 ```
-fast-compose-0.2.0/
+fast-compose-0.3.0/
   bin/
     fast-compose          start script for macOS and Linux
     fast-compose.bat      start script for Windows
@@ -117,18 +117,18 @@ localEngine=../fast-compose
 
 | | Where |
 |---|---|
-| The CLI | `cliVersion` in `gradle.properties` |
+| The CLI | `cliVersion` in `local.properties` (not in git); CI writes it from the release tag. Without it the version is `dev` |
 | The engine | `latest.release` in `gradle/libs.versions.toml`: the newest Fast Compose release on Maven Central |
 | Compose, Material 3, coroutines, serialization | `gradle/libs.versions.toml` |
 
 Every build takes the newest engine release. Gradle checks for a newer one once a day; `--refresh-dependencies`
-checks now. To pin a version, set `fastCompose` to it, e.g. `"0.2.0"`.
+checks now. To pin a version, set `fastCompose` to it, e.g. `"0.3.0"`.
 
 `fast-compose version` prints the CLI's version, from the jar's manifest, with the engine and Compose versions it was
 built with, from the engine's `FastComposeInfo`:
 
 ```
-Fast Compose CLI 0.2.0 (Fast Compose 0.2.0, Jetpack Compose 1.12.2)
+Fast Compose CLI 0.3.0 (Fast Compose 0.3.0, Jetpack Compose 1.12.2)
 ```
 
 ## CI and releases
@@ -151,10 +151,12 @@ Pushes and merges to `main` run nothing.
 
 Each packaging job fails if its zip has no `runtime/bin/java`, since that means it was built on the wrong system.
 
-To release:
+To release, push a tag: `git tag v0.3.0 && git push origin v0.3.0`. Each packaging job writes `cliVersion=0.3.0` to
+`local.properties` before building, so the zips and `fast-compose version` show the tag's version. The release is
+named after the version, with notes generated from the merged pull requests.
 
-1. Set `cliVersion` in `gradle.properties`, e.g. `0.2.0`.
-2. Push a tag with the same version: `git tag v0.2.0 && git push origin v0.2.0`.
+For a local build with a version, add it to `local.properties`:
 
-The release is named after the version, with notes generated from the merged pull requests. A tag that doesn't match
-`cliVersion` fails the release.
+```properties
+cliVersion=0.3.0
+```

@@ -48,17 +48,30 @@ class Workspace(private val settings: ProjectSettings) : Closeable {
     private val folders = mutableMapOf<String, FolderResources>()
 
     /**
-     * Runs library code without a binding: the classpath's jars, or only the JDK, Kotlin and coroutines without one.
-     * Compose, Kotlin and coroutines always come from the CLI itself.
+     * Runs library code without a binding: the classpath's jars, then the libraries the CLI ships
+     * ([BundledLibraries]), plus the JDK, Kotlin and coroutines. Compose, Kotlin and coroutines always come from the CLI
+     * itself.
      */
     val externals: ExternalResolver get() = resolver.value
 
-    private val resolver = lazy { JarResolver(GradleJars.jvmJars(settings.classpath)) }
+    private val resolver = lazy { JarResolver((GradleJars.jvmJars(settings.classpath) + BundledLibraries.jars).distinct()) }
 
-    /** Finds declarations of [file]'s project in other files; null for a virtual file or with sources turned off. */
+    private val modules = mutableMapOf<File, ModuleFolders>()
+
+    /** With `--modules`, the folders of every module of [file]'s Gradle project; null without it or outside a project. */
+    private fun modulesOf(file: SourceText): ModuleFolders? {
+        if (!settings.modules || file.virtual) return null
+        val root = GradleModules.rootOf(File(file.path)) ?: return null
+        return modules.getOrPut(root) { GradleModules.scan(root) }
+    }
+
+    /**
+     * Finds declarations of [file]'s project in other files: in its own module, then the `--source-root` folders, then,
+     * with `--modules`, every module of its project. Null for a virtual file or with sources turned off.
+     */
     fun sources(file: SourceText): SourceProvider? {
         if (!settings.sources || file.virtual) return null
-        val extra = settings.sourceRoots.map { DiskFiles.pathOf(it) }
+        val extra = settings.sourceRoots.map { DiskFiles.pathOf(it) } + modulesOf(file)?.sourceRoots.orEmpty()
         return FolderSources(kotlinSources, file.path, (kotlinSources.folderRoots(file.path) + extra).distinct())
     }
 
@@ -69,12 +82,14 @@ class Workspace(private val settings: ProjectSettings) : Closeable {
     }
 
     /**
-     * Resources for [file]: the folders given with `--res` first, then its own by Gradle layout, most specific first.
-     * Each folder is read fully and kept; changed files are read again on the next call.
+     * Resources for [file]: the folders given with `--res` first, then its own by Gradle layout, most specific first,
+     * then, with `--modules`, those of every module of its project. Each folder is read fully and kept; changed files
+     * are read again on the next call.
      */
     fun resources(file: SourceText): ResourceProvider {
         val own = if (file.virtual) emptyList() else GradleLayout.resourceFolders(DiskFiles, file.path)
-        val paths = (settings.resourceFolders.map { DiskFiles.pathOf(it) } + own).distinct()
+        val all = settings.resourceFolders.map { DiskFiles.pathOf(it) } + own + modulesOf(file)?.resourceFolders.orEmpty()
+        val paths = all.distinct()
         if (paths.isEmpty()) return ResourceProvider.Empty
         val providers = runBlocking {
             paths.map { path -> folders.getOrPut(path) { FolderResources(File(path)) }.also { it.refresh() }.files }
@@ -86,6 +101,7 @@ class Workspace(private val settings: ProjectSettings) : Closeable {
     fun clear() {
         kotlinSources.clear()
         folders.clear()
+        modules.clear()
     }
 
     override fun close() {

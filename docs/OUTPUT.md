@@ -24,7 +24,8 @@ Per file, its path relative to the current folder, with `/` separators, then:
 | `no @Preview functions` | The file has none (`render` and `list`) |
 | `output` | A line the previews printed with `println` |
 
-`check` leaves out the `preview` lines. The last line has the totals.
+`check` leaves out the `preview` lines. The last line has the totals. A console that can't show `→`, `×` or `·`, such
+as a Windows console on code page 437, gets `->`, `x` and `-` instead.
 
 - `--ignore-warnings` leaves out warnings, and they aren't counted.
 - `--quiet` leaves out `error`, `warning` and `output` lines; the totals still count problems.

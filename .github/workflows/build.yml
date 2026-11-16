@@ -85,6 +85,10 @@ jobs:
 
       - run: chmod +x gradlew
 
+      # The version comes from the tag: v0.3.0 builds 0.3.0.
+      - name: Set version from tag
+        run: echo "cliVersion=${GITHUB_REF_NAME#v}" >> local.properties
+
       # Fails if the runner isn't the target's system, since the zip would have no Java runtime.
       - name: Package
         run: |
@@ -107,17 +111,6 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
-
-      # The tag must match the version, so v0.1.0 releases 0.1.0.
-      - name: Check tag matches version
-        run: |
-          version=$(grep '^cliVersion=' gradle.properties | cut -d'=' -f2)
-          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match cliVersion $version"
-            exit 1
-          fi
-
       - name: Download the zips
         uses: actions/download-artifact@v7
         with:
