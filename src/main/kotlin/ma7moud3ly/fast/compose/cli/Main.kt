@@ -37,12 +37,15 @@ Options:
   --json                Print JSON instead of text
   --ignore-warnings     Report errors only
   -q, --quiet           Leave out problems, println output and messages; totals and the exit code still count them
+  --no-progress         Don't show the progress bar check and render show in a terminal
   --size WxH|DEVICE     Size in dp for previews without widthDp/heightDp: 411x891 (default), phone, foldable,
                         tablet, desktop
   --dark, --light       Render every preview in dark or light theme
   --font-scale N        Font scale for every preview
   --density N           Pixels per dp in images (default: 2)
   --wait MS             Time to let effects, animations and images settle before capture (default: 300)
+  -m, --modules         Read every module of the file's Gradle project: their main and commonMain sources and
+                        resources, not only the file's own module
   --no-sources          Don't read other project files; the file must declare what it uses
   --source-root DIR     Another source root to look up declarations in (repeatable)
   --res DIR             Another res/ or composeResources/ folder (repeatable)
@@ -95,8 +98,17 @@ private fun runFiles(options: Options, mode: Mode): Int {
             emptyList<FileReport>()
         } else {
             PreviewService(options.project).use { service ->
-                files.map { file ->
-                    val report = service.run(SourceText.read(file), mode, options.preview, options.render)
+                val sources = files.map { SourceText.read(it) }
+                val progress = if (showsProgress(options, mode)) progressFor(service, sources, options, mode, stderr) else null
+                var running = false
+                val results = files.mapIndexed { i, file ->
+                    val report = service.run(sources[i], mode, options.preview, options.render) { preview ->
+                        if (running) progress?.step()
+                        progress?.start("${file.name} ${Symbols.dot} ${preview.name}")
+                        running = true
+                    }
+                    if (running) progress?.step()
+                    running = false
                     if (mode == Mode.RENDER) writeImages(report, file, options.output, usedNames)
                     if (options.ignoreWarnings) {
                         report.copy(problems = report.problems.filter { it.severity == Severity.ERROR })
@@ -104,6 +116,8 @@ private fun runFiles(options: Options, mode: Mode): Int {
                         report
                     }
                 }
+                progress?.finish()
+                results
             }
         }
     } finally {
@@ -117,6 +131,29 @@ private fun runFiles(options: Options, mode: Mode): Int {
         println(toText(shown, showPreviews = mode != Mode.CHECK, details = !options.quiet))
     }
     return if (reports.any { it.errors > 0 }) 1 else 0
+}
+
+/**
+ * True when `check` and `render` show a progress bar: in a terminal, without `--quiet` or `--no-progress`. A
+ * redirected or piped output has no terminal, so scripts and CI logs get none.
+ */
+private fun showsProgress(options: Options, mode: Mode): Boolean =
+    mode != Mode.LIST && !options.quiet && options.progress && System.console() != null
+
+/**
+ * A progress bar over every preview of [sources]: their previews are listed first, with a bar over the files, so the
+ * total and the time left are known before rendering starts.
+ */
+private fun progressFor(service: PreviewService, sources: List<SourceText>, options: Options, mode: Mode, out: PrintStream): Progress {
+    val listing = Progress("Listing", sources.size, unit = "files", out = out)
+    var total = 0
+    for (source in sources) {
+        listing.start(source.path.substringAfterLast('/'))
+        total += service.run(source, Mode.LIST, options.preview).previews.size
+        listing.step()
+    }
+    listing.finish()
+    return Progress(if (mode == Mode.RENDER) "Rendering" else "Checking", total, out = out)
 }
 
 /** [report] with its file paths relative to the current folder, as the CLI prints them. */

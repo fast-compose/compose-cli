@@ -16,7 +16,7 @@ The tools read the same files and use the same engine as the [commands](COMMANDS
 The server is the `fast-compose` command with the argument `mcp`. Options after `mcp` apply to every tool call:
 
 ```bash
-fast-compose mcp --classpath @app/build/preview-classpath.txt --res design/src/main/res
+fast-compose mcp --modules --classpath @app/build/preview-classpath.txt
 ```
 
 On Windows, MCP clients start servers without a shell and can't run `.bat` files directly, so the examples below

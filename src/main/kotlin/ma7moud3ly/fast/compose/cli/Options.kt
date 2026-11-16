@@ -43,6 +43,7 @@ data class RenderSettings(
 /** Where previews find other files, resources and library code. */
 data class ProjectSettings(
     val sources: Boolean = true,
+    val modules: Boolean = false,
     val sourceRoots: List<File> = emptyList(),
     val resourceFolders: List<File> = emptyList(),
     val classpath: List<File> = emptyList(),
@@ -57,6 +58,7 @@ data class Options(
     val json: Boolean = false,
     val ignoreWarnings: Boolean = false,
     val quiet: Boolean = false,
+    val progress: Boolean = true,
     val recursive: Boolean = false,
     val render: RenderSettings = RenderSettings(),
     val project: ProjectSettings = ProjectSettings(),
@@ -87,6 +89,7 @@ data class Options(
                     "--ignore-warnings" -> options = options.copy(ignoreWarnings = true)
                     "-r", "--recursive" -> options = options.copy(recursive = true)
                     "-q", "--quiet" -> options = options.copy(quiet = true)
+                    "--no-progress" -> options = options.copy(progress = false)
                     "--size" -> render = render.copy(device = DeviceSize.parse(value()))
                     "--dark" -> render = render.copy(dark = true)
                     "--light" -> render = render.copy(dark = false)
@@ -96,6 +99,7 @@ data class Options(
                         waitMs = value().toLongOrNull()?.takeIf { it >= 0 } ?: throw UsageError("$name takes milliseconds"),
                     )
                     "--no-sources" -> project = project.copy(sources = false)
+                    "-m", "--modules" -> project = project.copy(modules = true)
                     "--source-root" -> project = project.copy(sourceRoots = project.sourceRoots + File(value()))
                     "--res" -> project = project.copy(resourceFolders = project.resourceFolders + File(value()))
                     "--classpath", "-cp" -> project = project.copy(classpath = project.classpath + classpath(value()))

@@ -39,7 +39,9 @@ app/src/main/kotlin/app/ui/HomeScreen.kt
   and see it, even before saving it.
 - **Projects without a build:** composables, themes and models from other files, `R` and `Res` resources, and real
   library code from jars.
-- **Text or JSON** output, exit codes for CI, and a quiet mode.
+- **Every preview Android Studio shows**, including multi-preview annotations such as `@PreviewLightDark` and one
+  preview per `@PreviewParameter` value.
+- **Text or JSON** output, exit codes for CI, a quiet mode, and a progress bar for long runs.
 - **One download**, with its own trimmed Java runtime: nothing else to install.
 
 ## Install
@@ -67,6 +69,9 @@ On macOS, if the system blocks the downloaded runtime, remove the quarantine fla
 # Check a file, a folder, or a whole source tree
 fast-compose check HomeScreen.kt
 fast-compose check -r app/src
+
+# Multi-module projects: read every module's sources and resources
+fast-compose render -r . --modules -o previews
 
 # Render previews to PNGs
 fast-compose render ui -o previews
@@ -145,7 +150,8 @@ shipping.
 | Message | What to do |
 |---|---|
 | `'X' (some.library) has no binding; a stand-in is used` | The library call ran as a placeholder. Pass the library's jars with `--classpath` ([Projects](docs/PROJECTS.md#library-code)) |
-| `Unresolved reference 'X' (imported from app.ui)` | No file declares it under the searched roots; add its module with `--source-root` |
+| `Unresolved reference 'X' (imported from app.ui)` | No file declares it under the searched roots; add `--modules` to read every module |
+| `'Instant' (kotlinx.datetime) has no binding` | The project uses kotlinx-datetime 0.6, the CLI ships 0.7; pass the project's own jar with `--classpath` ([Projects](docs/PROJECTS.md#library-code)) |
 | `UnsupportedClassVersionError … class file version 65.0` | The installation has no `runtime/` and the Java in `JAVA_HOME` is older than 21 |
 | `Timed out loading the files the preview uses` | Loading took over 20 seconds; check the other files the preview reaches |
 | `Preview crashed: …` | Compose threw while drawing; the message names the exception |

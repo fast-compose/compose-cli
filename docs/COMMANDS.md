@@ -110,9 +110,16 @@ imported from the project that no file declares, and invalid `@Preview` argument
 - A path that doesn't exist, and isn't a glob, is a command line error (exit code 2).
 - When nothing matches, the CLI prints `No Kotlin files with @Preview functions found` to stderr and exits with 0.
 
-A file is said to have previews when it has a `@Preview` annotation, written `@Preview` or fully qualified. Comments,
-strings and imports don't count. Only `@Composable` functions with `@Preview` are previews; a function with several
-`@Preview` annotations gives one preview per annotation.
+A file is said to have previews when it has a `@Preview` annotation, written `@Preview` or fully qualified, or one
+that may be a multi-preview annotation: a name with `Preview` in it, such as `@DevicePreviews`. Comments, strings and
+imports don't count. Previews are found as Android Studio finds them:
+
+- One preview per `@Preview` of a `@Composable` function.
+- One per `@Preview` of a multi-preview annotation: an annotation class annotated with `@Preview`s, from the same file
+  or another one of the project, such as `@DevicePreviews`, and AndroidX's `@PreviewLightDark`,
+  `@PreviewScreenSizes` and `@PreviewFontScale`. They're named after the function and the `@Preview`.
+- For a function with a `@PreviewParameter(Provider::class)` parameter, one preview per value of the provider, up to
+  its `limit`, named with the value's number: `Greeting (1)`, `Greeting (2)`.
 
 ## Options
 
@@ -136,10 +143,25 @@ fast-compose render HomeScreen.kt --preview HomePreview
 | `--json` | Prints [JSON](OUTPUT.md#json) instead of text; nothing else goes to stdout |
 | `--ignore-warnings` | Leaves warnings out of the output and the totals; only errors are reported |
 | `-q`, `--quiet` | Leaves out problems, `println` output and messages; the totals and the exit code still count them |
+| `--no-progress` | Doesn't show the progress bar |
 
 `--quiet` keeps the file and preview lines and the totals. With `--json`, `problems` and `output` are empty arrays
 and `errors` and `warnings` still have the real counts. Nothing is printed to stderr during the run, including
 messages from Compose and libraries. Command line errors are still printed.
+
+### Progress
+
+In a terminal, `check` and `render` show a progress bar on stderr, updated in place:
+
+```
+Listing  52%|██████████░░░░░░░░░░| 11/21 [00:02<00:02, 4.6 files/s] ForYouScreen.kt
+Rendering  45%|█████████░░░░░░░░░░░| 53/117 [00:21<00:25, 2.5 previews/s] ForYouScreen.kt · Loading - tablet
+```
+
+The files' previews are listed first, so the total and the time left are known before rendering starts. The line is
+cleared when the run ends, before the report. There's no progress bar with `--quiet` or `--no-progress`, or when
+the output is redirected or piped, e.g. in CI logs or `--json > report.json`. Terminals that can't show block
+characters get `#` and `-`.
 
 ### Rendering
 
@@ -181,6 +203,7 @@ previews whose `LaunchedEffect` changes state after a delay, or that show images
 
 | Option | Effect |
 |---|---|
+| `-m`, `--modules` | Reads every module of the file's Gradle project: their `main` and `commonMain` sources and resources |
 | `--no-sources` | Doesn't read other project files; the file must declare everything it uses besides bindings |
 | `--source-root DIR` | Another source root to look declarations up in, after the file's own (repeatable) |
 | `--res DIR` | Another `res/` or `composeResources/` folder, before the file's own (repeatable) |
@@ -190,6 +213,7 @@ previews whose `LaunchedEffect` changes state after a delay, or that show images
 `@file` reads more entries from a file, one or more per line. See [Projects](PROJECTS.md).
 
 ```bash
+fast-compose render -r app/src --modules -o previews
 fast-compose check Screen.kt --res ../design/src/main/res --classpath @build/preview-classpath.txt
 ```
 
